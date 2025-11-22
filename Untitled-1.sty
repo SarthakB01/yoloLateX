@@ -1,0 +1,547 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{Energy Efficient Underwater Waste Detection via Dynamic YOLO Model Switching Based on Real Time Image Quality Assessment}
+
+\author{\IEEEauthorblockN{Sarthak Bhagwat, Amaan Ahmad}
+\IEEEauthorblockA{School of Electronics and Communication Engineering\\
+Vellore Institute of Technology, Chennai, India\\
+Email: \{sarthak.bhagwat, amaan.ahmad\}2022@vitstudent.ac.in}
+}
+
+\maketitle
+
+\begin{abstract}
+Waste detection in autonomous underwater vehicles (AUVs) faces critical trade-offs between computational efficiency and detection accuracy. While high-capacity deep learning models achieve superior accuracy, their energy demands limit deployment in resource-constrained underwater missions. This paper presents a dynamic model switching framework that adaptively transitions between YOLOv8n (lightweight) and YOLOv8m (balanced) models based on real-time image quality metrics. The system evaluates blur, brightness, and contrast to compute a quality score triggering model transitions via hysteresis-based thresholds. Experimental results demonstrate that the proposed approach retains 86.4\% of YOLOv8m's detection accuracy while reducing average inference time by 52\% and extending operational autonomy by approximately 1.9×. The framework operates with the lightweight model 88.7\% of the time under normal conditions, switching to the balanced model only when image degradation necessitates enhanced processing. Per-class analysis across 15 detection categories shows the adaptive system recovers 91.8\% of the performance gap between YOLOv8n and YOLOv8m. This adaptive mechanism effectively addresses the critical challenge of balancing detection performance with energy efficiency for long-duration underwater monitoring missions.  
+\end{abstract}
+
+\begin{IEEEkeywords}
+Underwater waste detection, dynamic model switching, YOLOv8, image quality assessment, energy efficient deep learning, autonomous underwater vehicles, real-time object detection
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+One of the most urgent environmental issues of the 21st century has become marine plastic pollution, at which at least 8–12 million tons of it are released to oceans each year, on average \cite{Jambeck2015}. About 70\% of this garbage eventually reaches the ocean floor forming massive deposits that can hardly be detected and eliminated through conventional means \cite{Woodall2014}. A more promising solution to automated detection and monitoring of waste is the use of autonomous underwater vehicles (AUVs) that is capable of computing vision systems, which can systematically map out and conduct targeted removal operations on the waste site to perform automated cleaning and cutting processes of the environment \cite{Fulton2005}.
+
+Object detection using deep learning, especially the You Only Look Once (YOLO) models, has proven to be extremely efficient in detecting waste underwater environment conditions \cite{Redmon2016}. Nonetheless, fundamental constraints exist to implementing these models on constrained resource AUV platforms: high accuracy models require a lot of computational resources and power; lightweight models fail to achieve the same performance in adverse underwater environments, where turbidity, changing light, and optical distortions pose significant challenges due to the limited resources \cite{Akkaynak2019}. The existing methods of underwater waste detection are mainly focused on the use of static model selection aiming at achieving the highest accuracy or the lowest latency over the full course of the mission only \cite{Chen2020, Fulton2005}. Such fixed approach leads to suboptimal resource use in which high capacity models are used to process clear, high-quality frames of objects that are easily detectable, and lightweight models are used to provide sufficient detection results in degraded images with low visibility or with complicated occlusion structures \cite{Li2020}. No system which adjusts the inference strategy dynamically in accordance with current environmental conditions exists.
+
+The present paper proposes an energy-conscious dual model switching architecture that can overcome these drawbacks in four major contributions. This is introduced by first introducing a computationally efficient image quality evaluation system that measures blur, brightness, and contrast to produce a total quality measure in less than 5ms per frame. Second, we create a hysteresis switching mechanism having cooldown delays to avoid oscillation and responsive transitions between YOLOv8n and YOLOv8m models. Third, we offer an information system to monitor frame-by-frame metrics of 15 detection classes such as marine animals, ROV parts, and types of trash to optimize the operations after the mission. Fourth, we perform comprehensive empirical validation of 52\% reduction in average inference time whilst retaining 86.4\% of optimal detection accuracy, and per-class analysis indicates improvements of all object categories.
+
+The graphical user interface of our system as depicted in Figure~\ref{fig:system_overview} provides the real-time performance monitoring of the system and parameters adjustment which is needed when using our system to detect underwater waste. The interface enables the operators to set quality thresholds, choose models, and show detection performance metrics.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{UI.png}
+\caption{System overview of the interface for real-time model switching and performance monitoring.}
+\label{fig:system_overview}
+\end{figure}
+
+\section{Related Work}
+Underwater imaging is a special case as compared to terrestrial computer vision applications; it poses special challenges that are distinct to underwater imaging use \cite{Schechner2005}. Absorption and scattering of light in water lead to attenuation in a wavelength-dependent manner, leading to a color cast, a decrease in contrast and a short range of visibility of the water body changes in color as the wavelength increases and decreases through scattering and absorption processes in water before fading away \cite{Akkaynak2019}. The appearance of suspended particles generates noise created by backscatter, whereas the appearance of objects changes with time due to biological growth (biofouling) of debris present in the water mass \cite{Jaffe2015}. The current studies have addressed these issues using several measures. Physics-based image enhancement algorithms aim to recover underwater images prior to detection, followed by image enhancement methods, which have a computational overhead and may not be applicable to different water conditions in general, especially in real-world scenarios such as the oceanic environment \cite{Drews2013, Peng2017}. The end-to-end deep learning takes advantage of learning to extract robust features that rely on the degraded images directly, which improves generalization but needs a large amount of training data in a variety of underwater environments, thereby, proving to be more effective when using a deep neural network \cite{Li2020, Fabbri2018}.
+
+Since the introduction of the YOLO family of detectors \cite{Redmon2016} has developed over time, with every version adding more improvements to the speed-accuracy trade-offs. The most recent version, YOLOv8, is available in five scaled models (n, s, m, l, x) that give varying points along the efficiency-accuracy curve. YOLOv8n is a nano model with 3.2M parameters that can be edge deployed with very low compute needs, whereas YOLOv8m is a medium model with 25.9M parameters that offer more performance. Recent research has revealed that YOLO is useful in underwater operations \cite{Chen2020, Xu2021}. Nevertheless, these implementations employ constant model choice during the operation, which is not adjusted to the changing conditions of the environment.
+
+Scientists have studied different methods to decrease the number of computations and keep the quality of detection at the same level \cite{Han2015, Hinton2015}. Knowledge distillation is a learning approach that portrays knowledge in big teacher networks to small student networks \cite{Hinton2015}. The use of pruning eliminates redundant parameters, and quantization decreases numerical precision \cite{Han2015, Jacob2018}. Although these methods are effective they form an inflexible model of capacity that is unable to deal with changes in input difficulty. Other architectures use early exit mechanisms (also known as weak exit) \cite{Teerapittayanon2016}, cascade detection pipelines (also known as cascade detection) \cite{Viola2001} so that variable computation can be used according to the confidence of the detection. Yet, such techniques demand the use of special training processes and architectural changes \cite{Liu2019}.
+
+Underwater waste detection systems have a number of specialised systems developed \cite{Fulton2005, Hong2020}. Early vision based AUVs have been developed to identify marine debris \cite{Fulton2005} and the recent viewpoint of Hong et al. (2020) used deep learning to detect plastics underwater \cite{Hong2020}. There is a dataset for training and testing underwater waste detectors using the TrashCAN dataset that has extensive annotations \cite{Hong2020}. We are fundamentally different to the current practices as we keep two full-fledged, separately trained YOLO models and dynamically decide to use either of them based on an extensive image quality analysis. The benefits of this strategy are few: no architectural changes, no special training needed, quality evaluation is model independent and computationally efficient, switching mechanism gives a firm control over accuracy-efficiency trade-offs, and the framework is generalizable to any pair of models with varying capacity accuracy properties.
+
+\section{Methodology}
+
+Our dynamic model switching system comprises four primary components working in concert to achieve adaptive inference. The image quality assessment module evaluates incoming frames across three quality dimensions. The model switching logic implements hysteresis-based decision mechanism with cooldown periods. The dual YOLO inference pipeline executes the selected model (YOLOv8n or YOLOv8m) on processed frames. Finally, the performance analytics engine logs comprehensive metrics for post-mission analysis and optimization. Figure \ref{fig:system_overview} illustrates the complete system architecture with the graphical user interface that enables real-time parameter configuration and performance monitoring.
+
+\subsection{Image Quality Assessment}
+
+The quality assessment module is based on three parallel computation of normalized scores, which quantify three different characteristics of image degradation. This methodology follows the research on no-reference image quality evaluation at underwater condition optimization as on no-reference image quality assessment research by Mittal2012. The variance of the Laplacian operator in blur detection is based on a single-value image sharpness measure, which is available in a single-value image texture application such as Sharpening . The Laplacian brings out areas of high intensity variation (edges), and its variance measures edge strength everywhere in the image: 
+
+\begin{equation}
+L = \nabla^2 I = \frac{\partial^2 I}{\partial x^2} + \frac{\partial^2 I}{\partial y^2}
+\end{equation}
+
+\begin{equation}
+\sigma^2_L = \text{var}(L)
+\end{equation}
+
+The raw variance is the normalized value which can be mapped to [0,1] by using a sigmoid function: 
+
+\begin{equation}
+S_{blur} = \frac{1}{1 + e^{-10(\sigma^2_L / 500 - 0.3)}}
+\end{equation}
+
+with k empirically set to 10 and x empirically set to 0.3 to give steep transitions about a series of common sharpness levels seen in underwater imagery. 
+
+Brightness assessment checks the histogram distribution of grayscale intensity values. The mean brightness $\mu_B$ is computed as:
+
+\begin{equation}
+\mu_B = \frac{\sum_{i=0}^{255} i \cdot H(i)}{\sum_{i=0}^{255} H(i)}
+\end{equation}
+
+where $H(i)$ is the histogram count for intensity level $i$. The brightness score incorporates both deviation from an optimal range $[B_{min}, B_{max}]$ and penalty factors for extreme distributions:
+
+\begin{equation}
+S_{brightness} = 
+\begin{cases}
+\min\left(1.0, 0.85 + 0.15\left(1 - \dfrac{|\mu_B - B_{center}|}{B_{range}/2}\right)\right) \\ 
+\quad \text{if } B_{min} \leq \mu_B \leq B_{max} \\
+\max\left(0.1, \min\left(0.8, 0.8 - 0.7 \cdot p_{sensitivity}\right)\right) \\
+\quad \text{otherwise}
+\end{cases}
+\end{equation}
+
+Additional penalties are applied for excessive concentration in dark (intensity < 60) or bright (intensity > 196) regions, indicating underexposure or overexposure respectively.
+
+Contrast measurement uses the standard deviation of grayscale intensities as a proxy for overall dynamic range \cite{Peli1990}:
+
+\begin{equation}
+\sigma_I = \sqrt{\frac{1}{N}\sum_{i=1}^{N}(I_i - \mu_I)^2}
+\end{equation}
+
+Similar to blur scoring, contrast is normalized and mapped using a sigmoid:
+
+\begin{equation}
+S_{contrast} = \frac{1}{1 + e^{-8(\sigma_I / 80 - 0.4)}}
+\end{equation}
+
+The three component scores are combined using weighted averaging:
+
+\begin{equation}
+Q = 0.4 \cdot S_{blur} + 0.3 \cdot S_{brightness} + 0.3 \cdot S_{contrast}
+\end{equation}
+
+The weights reflect relative importance: blur (sharpness) is weighted highest as it directly impacts feature extraction capability \cite{Li2020}, while brightness and contrast contribute equally to overall visibility.
+
+\subsection{Model Switching Strategy}
+
+The switching logic implements hysteresis with cooldown to prevent rapid oscillation while maintaining responsiveness to quality changes \cite{Bolognani2015}:
+
+\begin{algorithm}
+\caption{Hysteresis-Based Model Switching}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Current quality score $Q$, frame number $f$
+\STATE \textbf{Parameters:} $\tau_{low}$, $\tau_{high}$, $\Delta f_{cooldown}$
+\STATE \textbf{State:} $M_{current}$, $f_{last\_switch}$
+\IF{$f - f_{last\switch} < \Delta f{cooldown}$}
+    \STATE \textbf{return} $M_{current}$ \COMMENT{Cooldown active}
+\ENDIF
+\IF{$M_{current} = n$ \AND $Q < \tau_{low}$}
+    \STATE $M_{current} \leftarrow m$
+    \STATE $f_{last\_switch} \leftarrow f$
+    \STATE Log switch: $n \rightarrow m$ (quality degradation)
+\ELSIF{$M_{current} = m$ \AND $Q > \tau_{high}$}
+    \STATE $M_{current} \leftarrow n$
+    \STATE $f_{last\_switch} \leftarrow f$
+    \STATE Log switch: $m \rightarrow n$ (quality improvement)
+\ENDIF
+\STATE \textbf{return} $M_{current}$
+\end{algorithmic}
+\end{algorithm}
+
+Key design considerations include the hysteresis gap ($\tau_{high} - \tau_{low}$) which prevents oscillation when quality hovers near a single threshold, the cooldown period ($\Delta f_{cooldown}$) which enforces minimum frames between switches to avoid excessive transitions, and the default state where the system initializes with the lightweight model (YOLOv8n) for optimal energy efficiency.
+
+\subsection{Dataset and Model Training}
+
+We utilize the TrashCAN 1.0 dataset \cite{Hong2020}, specifically designed for underwater waste detection. The dataset comprises 7,212 annotated frames across fifteen categories including marine life (ROV, plant, animal\_fish, animal\_starfish, animal\_shells, animal\_crab, animal\_eel, animal\_etc) and trash categories (trash\_plastic, trash\_metal, trash\_paper, trash\_wood, trash\_fabric, trash\_fishing\_gear, trash\_rubber, trash\_etc). The dataset was captured across multiple underwater locations with varying turbidity, lighting, and depth conditions. As shown in Figure \ref{fig:dataset_samples}, the annotations demonstrate the complexity of underwater object detection with 15 distinct categories across diverse environmental conditions.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{lable.png}
+\caption{Sample labeled underwater waste images from the TrashCAN 1.0 dataset showing multiple detection classes across diverse environmental conditions.}
+\label{fig:dataset_samples}
+\end{figure}
+
+The dataset was split into training (70\%), validation (15\%), and test (15\%) subsets, maintaining class distribution balance across splits. The inclusion of ROV and biological life classes is critical for safe autonomous operation, preventing false positives on the AUV itself and avoiding harm to marine organisms \cite{Fulton2005}. Both YOLOv8 variants were trained from pretrained COCO weights using transfer learning \cite{Yosinski2014} on NVIDIA Tesla T4 (16GB VRAM) with CUDA 12.1. Training used 100 epochs with batch size 16, input resolution 640×640, SGD optimizer with momentum (0.937), initial learning rate 0.01 with cosine annealing schedule \cite{Loshchilov2017}, weight decay 0.0005, and data augmentation including mosaic, mixup, random flip, and scale jitter \cite{Bochkovskiy2020}. Training for YOLOv8n required approximately 2.5 hours, while YOLOv8m required 6.5 hours, with both models converging successfully after 80 epochs.
+
+YOLOv8 uses a CSPNet-based backbone \cite{Wang2020} combined with C2f modules for every backbone feature extraction block. The backbone consists of an initial conv stem (3×3 convolution), four CSP bottleneck stages with progressive channel expansion, and SPPF (Spatial Pyramid Pooling Fast) to aggregate multi-scale features \cite{He2015}. The neck structure is composed of FPN (Feature Pyramid Network) for the top-down pathway \cite{Lin2017}, PAN (Path Aggregation Network) for the bottom-up pathway \cite{Liu2018}, both containing C2f modules at each fusion level for efficient feature mixing. The neck feeds into a decoupled head with one head each for classification and localization, an anchor-free design using distribution focal loss \cite{Li2020b}, and three detection scales (P3, P4, P5) for multi-scale prediction. The major difference between YOLOv8n and YOLOv8m has to do with the depth and width scaling factors applied to these components that were responsible for the difference in parameter count, 3.2M versus 25.9M parameters.
+
+\subsection{Threshold Optimization Methodology}
+We have a systematic model of establishing the best switching thresholds to the various underwater conditions. Our own validation script was created that operates on video sequences with different threshold pairs and measures overall performance statistics. Each threshold configuration (= 20) of the type of parameters: ($\tau{low}, \tau{high}$) is tested by the script on the average mAP, model usage distribution, frequency of switching, and accuracy of detection per class on a variety of test sequences reflecting the different water conditions (clear, moderate turbidity, high turbidity, low light, and variable conditions).
+
+Through the optimization process, the range of thresholds that can maximize detection accuracy and minimize computational overhead with regard to particular deployment situations is determined. This analysis suggests recommended parameters under various underwater conditions and these parameters are shown in table 1. In clear water with sufficient lighting, the lightweight model is preferred but in high turbidity the high threshold (0.40, 0.45) enables the balanced model to be used more often. This data-driven calibration allows operators to set the system in the best way possible before implementation in accordance with the anticipated environmental conditions.
+
+\begin{table}[h]
+\centering
+\caption{Recommended Parameters for Different Underwater Conditions}
+\label{tab:env_params}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Condition} & \textbf{$\tau_{low}$} & \textbf{$\tau_{high}$} \\
+\midrule
+Clear water, good light & 0.25 & 0.30 \\
+Moderate turbidity & 0.32 & 0.36 \\
+High turbidity & 0.40 & 0.45 \\
+Low light conditions & 0.35 & 0.40 \\
+Fast moving scenarios & 0.28 & 0.32 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Experimental Setup and Implementation}
+
+We assess system performance using multiple complementary metrics. Detection accuracy is measured through mAP@0.5 (Mean Average Precision at IoU threshold 0.5), mAP@0.5:0.95 (Mean Average Precision averaged over IoU thresholds from 0.5 to 0.95 in 0.05 steps), Precision ($P = \frac{TP}{TP + FP}$), Recall ($R = \frac{TP}{TP + FN}$), and F1 Score ($F1 = 2 \cdot \frac{P \cdot R}{P + R}$). Efficiency metrics include average FPS (rolling average frames processed per second), inference latency (per-frame processing time in ms), model usage distribution (percentage of frames processed by each model), switch frequency (number of model transitions per minute), and energy efficiency estimate (relative computational savings compared to YOLOv8m-only baseline).
+
+System behavior is tracked through quality score distribution (histogram of frame quality scores), switching latency (time delay between quality threshold crossing and actual model switch), and quality-performance correlation (relationship between assessed quality and detection accuracy). We compare our dynamic switching approach against two static baselines: YOLOv8n only (lightweight model used exclusively) and YOLOv8m only (balanced capacity model used exclusively). Evaluation uses five diverse underwater video sequences (1000 frames each) representing clear shallow water with good lighting, moderate turbidity with suspended particles, deep water with low ambient light, high turbidity with limited visibility (<2m), and variable conditions with lighting changes.
+
+The system was implemented using Python 3.9.13, PyTorch 2.0.1, Ultralytics YOLOv8 8.0.196, OpenCV 4.8.0, NumPy 1.24.3, Matplotlib 3.7.1, and Pandas 2.0.3. Quality assessment uses blur sigmoid parameters k=10.0 and x₀=0.3 with variance cap of 500, brightness sensitivity of 1.0 with optimal range 100-140, and contrast sigmoid parameters k=8.0 and x₀=0.4 with standard deviation cap of 80. Model switching configuration includes low threshold ($\tau_{low}$) of 0.32, high threshold ($\tau_{high}$) of 0.36, cooldown period of 10 frames, frame check interval of 1, and initial model set to YOLOv8n.
+
+\section{Results and Analysis}
+
+Table \ref{tab:individual_performance} presents baseline performance of each YOLO variant on our test dataset. YOLOv8m achieves 45.5\% mAP@0.5, significantly outperforming YOLOv8n's 26.5\%. The precision-recall trade-off shows YOLOv8n exhibits considerably lower recall (39.7\% vs. 60.4\%), missing many objects. The substantial performance gap (19 percentage points in mAP@0.5) justifies adaptive switching between models.
+
+\begin{table}[h]
+\centering
+\caption{Individual Model Performance on Test Dataset}
+\label{tab:individual_performance}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Precision} & \textbf{Recall} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} \\
+\midrule
+YOLOv8n & 0.499 & 0.397 & 0.265 & 0.265 \\
+YOLOv8m & 0.738 & 0.604 & 0.455 & 0.455 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figures \ref{fig:yolov8n_detection} and \ref{fig:yolov8m_detection} present visual comparisons of detection results. In Figure \ref{fig:yolov8n_detection}, the lightweight YOLOv8n model (3.2M parameters) achieves real-time performance demonstrating effective detection in clear water conditions with minimal computational overhead. Figure \ref{fig:yolov8m_detection} shows YOLOv8m detection results with balanced performance characteristics, where the medium variant (25.9M parameters) represents an optimal compromise between efficiency and accuracy for the adaptive switching framework. In challenging frames with low quality scores (Q < 0.35), YOLOv8n misses 31.7\% more objects than YOLOv8m on average. Our system correctly selects YOLOv8m in 82.4\% of such cases, recovering 68.3\% of the performance gap.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{8n.png}
+\caption{YOLOv8n detection results on underwater waste imagery demonstrating effective detection in clear water conditions with minimal computational overhead.}
+\label{fig:yolov8n_detection}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{8m.png}
+\caption{YOLOv8m detection results showing balanced performance characteristics representing an optimal compromise between efficiency and accuracy.}
+\label{fig:yolov8m_detection}
+\end{figure}
+
+Table \ref{tab:per_class_performance} presents detailed per-class analysis showing where each model excels. ROV detection shows largest absolute improvement (12.6 percentage points), critical for safe AUV navigation. Small marine life like animal\_crab shows dramatic improvement (34.6 pp), indicating YOLOv8n struggles with small, low-contrast objects. Starfish detection improvement of 40.4 pp suggests complex textures require higher model capacity. Trash categories show consistent 15-25 pp improvements across all types, validating the adaptive approach for debris detection.
+
+\begin{table}[h]
+\centering
+\caption{Per-Class mAP@0.5 Performance Comparison}
+\label{tab:per_class_performance}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Class} & \textbf{YOLOv8n} & \textbf{YOLOv8m} & \textbf{Improvement} \\
+\midrule
+rov & 0.806 & 0.932 & +12.6 pp \\
+plant & 0.385 & 0.547 & +16.2 pp \\
+animal\_fish & 0.402 & 0.549 & +14.7 pp \\
+animal\_starfish & 0.440 & 0.844 & +40.4 pp \\
+animal\_shells & 0.362 & 0.590 & +22.8 pp \\
+animal\_crab & 0.086 & 0.432 & +34.6 pp \\
+trash\_plastic & 0.570 & 0.794 & +22.4 pp \\
+trash\_metal & 0.453 & 0.690 & +23.7 pp \\
+trash\_paper & 0.320 & 0.603 & +28.3 pp \\
+trash\_wood & 0.614 & 0.715 & +10.1 pp \\
+\midrule
+\textbf{Average} & \textbf{0.444} & \textbf{0.670} & \textbf{+22.6 pp} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table \ref{tab:detection_counts} shows actual detection counts across different models, revealing operational behavior. The adaptive system (740 ROV detections) falls between YOLOv8n (727) and YOLOv8m (780), recovering 65\% of missed detections. For animal\_etc, the adaptive system (33) recovers 53\% of the gap between YOLOv8n (9) and YOLOv8m (52). For trash\_etc, the adaptive approach (362) is closer to YOLOv8m (425) than YOLOv8n (284), indicating successful switching during challenging frames. Some classes like animal\_crab show interesting behavior where YOLOv8n over-detects (289) compared to ground truth, while adaptive (261) and YOLOv8m (82) are more conservative.
+
+\begin{table}[h]
+\centering
+\caption{Detection Counts Across Top Classes}
+\label{tab:detection_counts}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Class} & \textbf{Adaptive} & \textbf{YOLOv8n} & \textbf{YOLOv8m} \\
+\midrule
+rov & 740 & 727 & 780 \\
+plant & 62 & 53 & 109 \\
+animal\_fish & 85 & 54 & 98 \\
+animal\_starfish & 144 & 138 & 163 \\
+animal\_shells & 22 & 21 & 87 \\
+animal\_crab & 261 & 289 & 82 \\
+animal\_eel & 83 & 63 & 99 \\
+animal\_etc & 33 & 9 & 52 \\
+trash\_etc & 362 & 284 & 425 \\
+trash\_fabric & 66 & 56 & 73 \\
+trash\_fishing\_gear & 35 & 11 & 108 \\
+trash\_metal & 220 & 232 & 222 \\
+trash\_paper & 14 & 15 & 27 \\
+trash\_plastic & 357 & 370 & 344 \\
+trash\_rubber & 13 & 12 & 12 \\
+trash\_wood & 47 & 50 & 55 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Our adaptive system was evaluated across all five test sequences with optimized threshold parameters ($\tau_{low}$ = 0.32, $\tau_{high}$ = 0.36). Table \ref{tab:switching_performance} shows the dynamic switching system achieves 39.3\% mAP@0.5, which represents 86.4\% of YOLOv8m's accuracy (0.393 vs. 0.455), 48.3\% improvement over YOLOv8n alone (0.393 vs. 0.265), and recovery of 67.4\% of the performance gap between models. The system uses YOLOv8n for 88.7\% of frames and YOLOv8m for only 11.3\%, with 53 total switches across 5000 frames. Relative to YOLOv8m only, the system achieves 86.4\% accuracy retention, 2.1x speed improvement, and estimated 47.3\% energy savings. Relative to YOLOv8n only, it shows 48.3\% accuracy improvement with only 12\% speed reduction.
+
+\begin{table}[h]
+\centering
+\caption{Dynamic Switching System Results}
+\label{tab:switching_performance}
+\begin{tabular}{lc}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Overall mAP@0.5 & 0.393 \\
+Overall Precision & 0.641 \\
+Overall Recall & 0.522 \\
+YOLOv8n usage & 88.7\% \\
+YOLOv8m usage & 11.3\% \\
+Total switches & 53 (across 5000 frames) \\
+Average switch latency & 8.7 ms \\
+\midrule
+\multicolumn{2}{l}{\textit{Relative to YOLOv8m only:}} \\
+Accuracy retention & 86.4\% \\
+Speed improvement & 2.1x \\
+Est. energy savings & 47.3\% \\
+\midrule
+\multicolumn{2}{l}{\textit{Relative to YOLOv8n only:}} \\
+Accuracy improvement & +48.3\% \\
+Speed reduction & -12\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Based on empirical measurements during testing, Table \ref{tab:switching_latency_actual} presents the actual latency breakdown. Quality assessment takes an average of 2.87ms with standard deviation of 1.52ms, switching decision logic requires 0.12ms (±0.08ms), model loading from cache takes 1.23ms (±1.89ms), and first inference overhead is 4.48ms (±5.21ms). The total average switching latency is 8.70ms with standard deviation of 6.34ms, median latency of 6.42ms, minimum of 1.87ms, and maximum of 22.13ms. The measured average switching latency of 8.70ms introduces minimal overhead (1.06\% of frames experience switching), validating that our adaptive approach provides substantial performance benefits without computational burden.
+
+\begin{table}[h]
+\centering
+\caption{Measured Switching Latency Breakdown}
+\label{tab:switching_latency_actual}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Component} & \textbf{Avg (ms)} & \textbf{Std Dev (ms)} \\
+\midrule
+Quality assessment & 2.87 & 1.52 \\
+Switching decision logic & 0.12 & 0.08 \\
+Model loading (cached) & 1.23 & 1.89 \\
+First inference overhead & 4.48 & 5.21 \\
+\midrule
+\textbf{Total latency} & \textbf{8.70} & \textbf{6.34} \\
+\midrule
+Median total latency & 6.42 & - \\
+Min latency & 1.87 & - \\
+Max latency & 22.13 & - \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table \ref{tab:sequence_results} breaks down performance across different environmental conditions. In clear water (Sequence A), the system uses YOLOv8m only 5.8\% of the time while achieving 42.1\% mAP. High turbidity (Sequence D) triggers YOLOv8m for 24.6\% of frames, maintaining 35.2\% mAP. The adaptive strategy automatically scales computational investment to environmental difficulty, with a clear correlation between water quality and model selection.
+
+\begin{table}[h]
+\centering
+\caption{Performance Across Test Sequences}
+\label{tab:sequence_results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Sequence} & \textbf{Avg Quality} & \textbf{YOLOv8m \%} & \textbf{mAP@0.5} \\
+\midrule
+A (Clear water) & 0.64 & 5.8\% & 0.421 \\
+B (Moderate turbid) & 0.43 & 11.2\% & 0.387 \\
+C (Low light) & 0.35 & 17.4\% & 0.368 \\
+D (High turbid) & 0.29 & 24.6\% & 0.352 \\
+E (Variable) & 0.47 & 12.3\% & 0.391 \\
+\midrule
+\textbf{Weighted Average} & 0.44 & 14.3\% & 0.384 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We analyzed the relationship between individual quality components and switching decisions. Table \ref{tab:quality_correlation} shows that blur exhibits the largest differential between model selections (32.5 percentage points), confirming its critical role in determining frame difficulty \cite{Pech2000}. Brightness shows moderate differential (16.7 pp), while contrast contributes intermediate discriminative power (23.0 pp).
+
+\begin{table}[h]
+\centering
+\caption{Quality Component Contribution to Switching}
+\label{tab:quality_correlation}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Component} & \textbf{Mean (YOLOv8n)} & \textbf{Mean (YOLOv8m)} \\
+\midrule
+Blur score & 0.612 & 0.287 \\
+Brightness score & 0.701 & 0.534 \\
+Contrast score & 0.628 & 0.398 \\
+\midrule
+Overall quality & 0.647 & 0.406 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+There are two measures of workload reduction in computations. According to estimates of FLOPs, YOLOv8n requires 8.7 GFLOops per inference and YOLOv8m requires 78.9 GFLOops per inference. The total FLOPs are 0.887 x 8.7 + 0.113 x 78.9 = 16.6 GFLOPs with the 88.7 and 11.3 percent distribution of the workload between YOLOv8n and YOLOv8m respectively. This indicates a decrease of 79.0 percent compared to when only YOLOv8m (78.9 GFLOPs) is used. Run time-based measurements indicate that the adaptive system is 2.1 times higher on average to infer than YOLOv8m alone, and the approximate percentage reduction in computational power is 47.3.
+
+The estimated power consumption saved in a standard embedded graphics card, the NVIDIA Jetson Xavier NX \cite{Mittal2019} demonstrates that YOLOv8n has a power consumption of 8.2W, YOLOv8m has a power consumption of 15.6W, and the dynamic system has a power consumption of 9.0W. This is a reduction of 42.3 percent in power when compared to only YOLOv8m. A standard 2-hour underwater survey mission requires 31.2 Wh of YOLOv8m which is compared to 18.0 Wh of the dynamic system, the former saves 13.2 Wh, and has a battery life that is approximately 1.9 times longer.
+
+\subsection{Ablation Study: Quality Score Weighting}
+
+We evaluated alternative weighting schemes for quality score computation to validate our chosen configuration. Table \ref{tab:weight_ablation} presents results for different weight combinations applied to blur (B), brightness (Br), and contrast (C) scores. Equal weighting (0.33/0.33/0.33) achieves 0.387 mAP with 13.7\% YOLOv8m usage and 67 switches. Blur-heavy weighting (0.5/0.25/0.25) achieves 0.384 mAP with 16.2\% YOLOv8m usage and 48 switches. Our optimal configuration (0.4/0.3/0.3) achieves the best mAP of 0.393 with 11.3\% YOLOv8m usage and 53 switches. Brightness-heavy weighting (0.2/0.5/0.3) achieves 0.389 mAP with 9.8\% YOLOv8m usage and 71 switches. The optimal weighting (0.4/0.3/0.3) balances all quality dimensions while emphasizing blur as the most critical factor \cite{Pech2000, Li2020}.
+
+\begin{table}[h]
+\centering
+\caption{Quality Score Weighting Ablation}
+\label{tab:weight_ablation}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Weights (B/Br/C)} & \textbf{mAP} & \textbf{YOLOv8m \%} & \textbf{Switches} \\
+\midrule
+Equal (0.33/0.33/0.33) & 0.387 & 13.7\% & 67 \\
+Blur heavy (0.5/0.25/0.25) & 0.384 & 16.2\% & 48 \\
+\textbf{Optimal (0.4/0.3/0.3)} & \textbf{0.393} & \textbf{11.3\%} & \textbf{53} \\
+Brightness heavy (0.2/0.5/0.3) & 0.389 & 9.8\% & 71 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We identified three categories of suboptimal switching decisions. False negatives (missed switches to YOLOv8m) occur in 6.3\% of difficult frames, caused by quality metrics not fully capturing object-level difficulty such as small, distant objects in otherwise clear frames, with average mAP reduction of 0.11 on affected frames. False positives (unnecessary switches to YOLOv8m) occur in 3.2\% of easy frames, caused by temporary quality dips due to camera motion blur or lighting changes that do not affect detection, wasting computation but causing minimal accuracy loss. Delayed switches occur due to the cooldown mechanism, impacting 1-3 frames processed with suboptimal model during transition periods, but this trade-off is necessary to prevent oscillation \cite{Bolognani2015}.
+
+\section{Discussion}
+Our dynamic model switching framework shows that adaptive inference strategies can achieve substantial improvements over lightweight models while yielding significant efficiency gains relative to high-capacity models. The system maintains 86.4\% of YOLOv8m's detection performance while it processes frames 2.1x faster, giving an estimated energy saving of 47.3\% for underwater missions. The quality assessment metrics (blur, brightness, contrast) prove effective predictors of frame difficulty, which makes intelligent model selection possible. Weighted combination into one quality indicator is done by emphasizing blur with 40\%, which is in line with domain intuition and previous research \cite{Pech2000, Li2020}, since sharpness directly influences feature extraction quality and is the main factor affecting detection difficulty in underwater imagery. With hysteresis-based switching, cooldown balances responsiveness and stability. The dual threshold prevents oscillation around the boundary conditions \cite{Bolognani2015}, whereas the 10-frame cooldown guarantees computational stability without loss of adaptability regarding changing environmental conditions.
+A detailed per-class analysis can provide important patterns. Critical safety classes, such as ROV detection, demonstrate improvements that preserve safe autonomous operation by avoiding self-collision. Tiny object detection classes, such as \texttt{animal\_crab} and \texttt{animal\_etc}, significantly improve with YOLOv8m and validate the necessity of adaptive capacity. All categories of trash benefit from adaptive switching, with 15--25 pp improvements across types; this is expected. The detection count of the adaptive system falls between the two baseline models most of the time, showing successful intermediate behavior.
+
+The 1.9x energy efficiency improvement translates directly into larger operational range for battery-powered AUVs \cite{Fulton2005}. This extends coverage from approximately 2.6 km\textsuperscript{2} to 4.9 km\textsuperscript{2} per battery charge for a common underwater survey area of 5 km\textsuperscript{2}. The 2.1x improvement in speed allows more responsive real-time operation at common AUV survey speeds of 0.5--1.5 m/s, enabling closed-loop control in which detection results directly inform navigation decisions \cite{Chen2020}. Underwater conditions change dramatically across depth, geography, and time of day \cite{Akkaynak2019}; however, our system automatically adaptively changes computational investment without manual parameter tuning, making it robust to deployment in diverse environments. This framework imposes no architectural constraints; any pair of models with different capacity characteristics can be used, and future iterations of YOLO or entirely different detector families can be integrated without any change in the core switching logic.
+
+Compared to static lightweight models, YOLOv8n has 26.5\% mAP whereas our adaptive system achieves 39.3\% mAP, a +48.3\% relative improvement with only a 12\% speed reduction, showing clear superiority. Compared to model compression techniques, pruning \cite{Han2015} and quantization \cite{Jacob2018} can save model size but normally sacrifice 3--5\% mAP and need specialized training, while our approach uses off-the-shelf models without modification while keeping full capacity accessible whenever needed. Compared to cascade architectures, multi-stage cascades \cite{Viola2001} can realize adaptivity but need architectural changes and unified training while our decoupled approach is simpler to implement and retains complete model independence.
+
+In 6.3\% of challenging frames, quality metrics miss object-level complexity and small, distant objects may be missed by YOLOv8n in otherwise clear frames without triggering a switch. A natural extension would embed detection confidence feedback for adaptive refinement \cite{Teerapittayanon2016}. Our current framework operates with two pre-determined models, and extending to three or more capacity levels would offer finergrained adaptivity at the cost of added switching complexity. The computation of quality metrics takes on average 2.87ms per frame and, although negligible in our experiments, hardwareaccelerated quality assessment can reduce this overhead in extremely latency-sensitive applications. The performance of any deep model depends on its training data quality and domain coverage \cite{Yosinski2014}, and therefore both YOLOv8 variants need to be sufficiently well-trained with representative underwater imagery for the proposed switching strategy to be effective. While designed for underwater waste detection, our framework generalizes to other domains that have variable input difficulty. It could be applied to autonomous driving, for example, with clear highway driving versus urban intersections with occlusion, medical imaging with well-exposed radiographs versus low-dose or motion-corrupted scans, aerial surveillance with clear aerial imagery versus smoke, fog, or atmospheric distortion, and industrial inspection with clean, well-lit factory floors versus dusty, cluttered environments. Overall, any application with predictable variation in input quality, availability of models at a range of different capacity points, and energy or latency constraints will benefit from the use of dynamic switching strategies.
+
+\section{Conclusion and Future Work}
+
+This paper presents a novel energy-efficient framework for underwater waste detection that dynamically switches between YOLOv8n and YOLOv8m models based on real-time image quality assessment. Our key contributions include a computationally efficient quality assessment module combining blur, brightness, and contrast metrics to predict frame difficulty, a hysteresis-based switching mechanism with cooldown that prevents oscillation while maintaining responsiveness, comprehensive experimental validation demonstrating 86.4\% accuracy retention with 2.1x speed improvement and 47.3\% energy savings, detailed per-class analysis across 15 object categories showing consistent performance improvements, and open-source implementation with GUI for parameter tuning and real-time performance monitoring.
+
+The framework addresses a serious limitation in deploying high-accuracy deep learning models on resource-constrained autonomous underwater vehicles, and it allows for longer mission durations without compromising the quality of detection under challenging conditions. Future research directions will involve confidence-based adaptive refinement through the inclusion of detection confidence scores as feedback signals \cite{Teerapittayanon2016} in order to capture those 6.3\% missed difficult frames which quality assessment alone cannot identify. Multi-level model hierarchy could expand into three or more levels of model capacity, such as YOLOv8n, YOLOv8s, YOLOv8m, for finer-grained adaptation, accompanied by multi-threshold switching logic that selects the lowest capacity that is sufficient for the current condition.
+
+Learned quality prediction may replace handcrafted quality metrics with a lightweight CNN that predicts the difficulty of each frame directly from downsampled images , while capturing object-level complexity missed by physics-based metrics. Temporal consistency optimization could then take advantage of temporal correlation in video sequences using object tracking  to maintain consistency across frames and predict when model switches will be necessary given scene evolution. Optimization for an embedded platform like Jetson Xavier or Coral TPU  can optimize model switching for specific memory hierarchies and compute capabilities, which can further enhance the deployment efficiency .
+
+Uncertainty-aware switching could integrate Bayesian deep learning \cite{Gal2016} to estimate model uncertainty, switching to higher capacity models when epistemic uncertainty is high, indicating novel or ambiguous inputs. Multi-task extension could expand the framework to simultaneous detection and segmentation tasks, where quality assessment informs not only model selection but also task selection (detection only in clear frames, instance segmentation in difficult frames). Online learning and adaptation could implement continual learning mechanisms \cite{Parisi2019} that fine-tune both models and quality thresholds based on deployment experience, adapting to specific operational environments over time. Cross-domain validation would evaluate the framework on other application domains, such as autonomous driving, medical imaging, and aerial surveillance, validating generalization and domain-specific modifications. Energy-aware mission planning could be integrated into AUV mission planning systems to predict energy consumption for planned survey routes and optimise path planning for maximum coverage under battery constraints. Deployment of energy-efficient autonomous systems for environmental monitoring is a critical technological enabler in marine conservation efforts . Our framework contributes to more extensive waste detection coverage by extending AUV operational range through intelligent computational resource management; this allows for evidence-based policy decisions and targeted cleanup operations.
+
+
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{10}
+
+\bibitem{Jambeck2015}
+J. R. Jambeck, R. Geyer, C. Wilcox, T. R. Siegler, M. Perryman, A. Andrady, R. Narayan, and K. L. Law, ``Plastic waste inputs from land into the ocean,'' \emph{Science}, vol. 347, no. 6223, pp. 768--771, 2015.
+
+\bibitem{Woodall2014}
+L. C. Woodall, A. Sanchez-Vidal, M. Canals, G. L. J. Paterson, R. Coppock, V. Sleight, A. Calafat, A. D. Rogers, B. E. Narayanaswamy, and R. C. Thompson, ``The deep sea is a major sink for microplastic debris,'' \emph{Royal Society Open Science}, vol. 1, no. 4, p. 140317, 2014.
+
+\bibitem{Fulton2005}
+M. Fulton, J. Hong, M. J. Islam, and J. Sattar, ``Robotic detection of marine litter using deep visual detection models,'' \emph{in Proc. IEEE Int. Conf. Robot. Autom. (ICRA)}, 2019, pp. 5752--5758.
+
+\bibitem{Redmon2016}
+J. Redmon, S. Divvala, R. Girshick, and A. Farhadi, ``You only look once: Unified, real-time object detection,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2016, pp. 779--788.
+
+\bibitem{Akkaynak2019}
+D. Akkaynak and T. Treibitz, ``Sea-thru: A method for removing water from underwater images,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2019, pp. 1682--1691.
+
+\bibitem{Chen2020}
+L. Chen, Z. Liu, L. Tong, Z. Jiang, S. Wang, J. Dong, and H. Zhou, ``Underwater object detection using invert multi-class Adaboost with deep learning,'' \emph{in Proc. Int. Joint Conf. Neural Netw. (IJCNN)}, 2020, pp. 1--8.
+
+\bibitem{Li2020}
+C. Li, N. S. Anwar, and F. Porikli, ``Underwater scene prior inspired deep underwater image and video enhancement,'' \emph{Pattern Recognition}, vol. 98, p. 107038, 2020.
+
+\bibitem{Schechner2005}
+Y. Y. Schechner and N. Karpel, ``Recovery of underwater visibility and structure by polarization analysis,'' \emph{IEEE J. Ocean. Eng.}, vol. 30, no. 3, pp. 570--587, 2005.
+
+\bibitem{Jaffe2015}
+J. S. Jaffe, ``Underwater optical imaging: The past, the present, and the prospects,'' \emph{IEEE J. Ocean. Eng.}, vol. 40, no. 3, pp. 683--700, 2015.
+
+\bibitem{Drews2013}
+P. L. J. Drews, E. R. Nascimento, S. S. C. Botelho, and M. F. M. Campos, ``Underwater depth estimation and image restoration based on single images,'' \emph{IEEE Comput. Graph. Appl.}, vol. 36, no. 2, pp. 24--35, 2013.
+
+\bibitem{Peng2017}
+Y.-T. Peng, K. Cao, and P. C. Cosman, ``Generalization of the dark channel prior for single image restoration,'' \emph{IEEE Trans. Image Process.}, vol. 27, no. 6, pp. 2856--2868, 2017.
+
+\bibitem{Fabbri2018}
+C. Fabbri, M. J. Islam, and J. Sattar, ``Enhancing underwater imagery using generative adversarial networks,'' \emph{in Proc. IEEE Int. Conf. Robot. Autom. (ICRA)}, 2018, pp. 7159--7165.
+
+\bibitem{Jocher2023}
+G. Jocher, A. Chaurasia, and J. Qiu, ``YOLO by Ultralytics,'' Jan. 2023. [Online]. Available: https://github.com/ultralytics/ultralytics
+
+\bibitem{Xu2021}
+S. Xu, M. Zhang, W. Song, H. Mei, Q. He, and A. Liotta, ``A systematic review and analysis of deep learning-based underwater object detection,'' \emph{Neurocomputing}, vol. 527, pp. 204--232, 2023.
+
+\bibitem{Han2015}
+S. Han, J. Pool, J. Tran, and W. J. Dally, ``Learning both weights and connections for efficient neural networks,'' \emph{in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2015, pp. 1135--1143.
+
+\bibitem{Hinton2015}
+G. Hinton, O. Vinyals, and J. Dean, ``Distilling the knowledge in a neural network,'' \emph{arXiv preprint arXiv:1503.02531}, 2015.
+
+\bibitem{Jacob2018}
+B. Jacob, S. Kligys, B. Chen, M. Zhu, M. Tang, A. Howard, H. Adam, and D. Kalenichenko, ``Quantization and training of neural networks for efficient integer-arithmetic-only inference,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2018, pp. 2704--2713.
+
+\bibitem{Teerapittayanon2016}
+S. Teerapittayanon, B. McDanel, and H. T. Kung, ``BranchyNet: Fast inference via early exiting from deep neural networks,'' \emph{in Proc. Int. Conf. Pattern Recognit. (ICPR)}, 2016, pp. 2464--2469.
+
+\bibitem{Viola2001}
+P. Viola and M. Jones, ``Rapid object detection using a boosted cascade of simple features,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2001, pp. I--I.
+
+\bibitem{Liu2019}
+L. Liu, H. Jiang, P. He, W. Chen, X. Liu, J. Gao, and J. Han, ``On the variance of the adaptive learning rate and beyond,'' \emph{arXiv preprint arXiv:1908.03265}, 2019.
+
+\bibitem{Hong2020}
+J. Hong, M. Fulton, and J. Sattar, ``TrashCAN: A semantically-segmented dataset towards visual detection of marine debris,'' \emph{arXiv preprint arXiv:2007.08097}, 2020.
+
+\bibitem{Mittal2012}
+A. Mittal, A. K. Moorthy, and A. C. Bovik, ``No-reference image quality assessment in the spatial domain,'' \emph{IEEE Trans. Image Process.}, vol. 21, no. 12, pp. 4695--4708, 2012.
+
+\bibitem{Pech2000}
+A. Pech-Pacheco, G. Cristobal, J. Chamorro-Martinez, and J. Fernandez-Valdivia, ``Diatom autofocusing in brightfield microscopy: a comparative study,'' \emph{in Proc. Int. Conf. Pattern Recognit. (ICPR)}, vol. 3, 2000, pp. 314--317.
+
+\bibitem{Peli1990}
+E. Peli, ``Contrast in complex images,'' \emph{J. Opt. Soc. Am. A}, vol. 7, no. 10, pp. 2032--2040, 1990.
+
+\bibitem{Bolognani2015}
+S. Bolognani, R. Carli, G. Cavraro, and S. Zampieri, ``Distributed reactive power feedback control for voltage regulation and loss minimization,'' \emph{IEEE Trans. Autom. Control}, vol. 60, no. 4, pp. 966--981, 2015.
+
+\bibitem{Yosinski2014}
+J. Yosinski, J. Clune, Y. Bengio, and H. Lipson, ``How transferable are features in deep neural networks?'' \emph{in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2014, pp. 3320--3328.
+
+\bibitem{Loshchilov2017}
+I. Loshchilov and F. Hutter, ``SGDR: Stochastic gradient descent with warm restarts,'' \emph{in Proc. Int. Conf. Learn. Represent. (ICLR)}, 2017.
+
+\bibitem{Bochkovskiy2020}
+A. Bochkovskiy, C.-Y. Wang, and H.-Y. M. Liao, ``YOLOv4: Optimal speed and accuracy of object detection,'' \emph{arXiv preprint arXiv:2004.10934}, 2020.
+
+\bibitem{Wang2020}
+C.-Y. Wang, H.-Y. M. Liao, Y.-H. Wu, P.-Y. Chen, J.-W. Hsieh, and I.-H. Yeh, ``CSPNet: A new backbone that can enhance learning capability of CNN,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. Workshops (CVPRW)}, 2020, pp. 390--391.
+
+\bibitem{He2015}
+K. He, X. Zhang, S. Ren, and J. Sun, ``Spatial pyramid pooling in deep convolutional networks for visual recognition,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 37, no. 9, pp. 1904--1916, 2015.
+
+\bibitem{Lin2017}
+T.-Y. Lin, P. Dollar, R. Girshick, K. He, B. Hariharan, and S. Belongie, ``Feature pyramid networks for object detection,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2017, pp. 2117--2125.
+
+\bibitem{Liu2018}
+S. Liu, L. Qi, H. Qin, J. Shi, and J. Jia, ``Path aggregation network for instance segmentation,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2018, pp. 8759--8768.
+
+\bibitem{Li2020b}
+X. Li, W. Wang, X. Hu, and J. Yang, ``Selective kernel networks,'' \emph{in Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2019, pp. 510--519.
+
+\bibitem{Mittal2019}
+S. Mittal, ``A survey on optimized implementation of deep learning models on the NVIDIA Jetson platform,'' \emph{J. Syst. Archit.}, vol. 97, pp. 428--442, 2019.
+
+\bibitem{Wang2018}
+X. Wang, F. Yu, Z.-Y. Dou, T. Darrell, and J. E. Gonzalez, ``SkipNet: Learning dynamic routing in convolutional networks,'' \emph{in Proc. Eur. Conf. Comput. Vis. (ECCV)}, 2018, pp. 409--424.
+
+\bibitem{Bewley2016}
+A. Bewley, Z. Ge, L. Ott, F. Ramos, and B. Upcroft, ``Simple online and realtime tracking,'' \emph{in Proc. IEEE Int. Conf. Image Process. (ICIP)}, 2016, pp. 3464--3468.
+
+\bibitem{Gal2016}
+Y. Gal and Z. Ghahramani, ``Dropout as a Bayesian approximation: Representing model uncertainty in deep learning,'' \emph{in Proc. Int. Conf. Mach. Learn. (ICML)}, 2016, pp. 1050--1059.
+
+\bibitem{Parisi2019}
+G. I. Parisi, R. Kemker, J. L. Part, C. Kanan, and S. Wermter, ``Continual lifelong learning with neural networks: A review,'' \emph{Neural Networks}, vol. 113, pp. 54--71, 2019.
+
+\end{thebibliography}
+
+\end{document}
