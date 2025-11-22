@@ -197,7 +197,7 @@ The system is implemented using Python 3.9.13, PyTorch 2.0.1, Ultralytics YOLOv8
 
 \section{Results and Analysis}
 
-Table \ref{tab:individual_performance} presents baseline performance of each YOLO variant on our test dataset. YOLOv8m achieves 45.5\% mAP@0.5, significantly outperforming YOLOv8n's 26.5\%. The precision-recall trade-off shows YOLOv8n exhibits considerably lower recall (39.7\% vs. 60.4\%), missing many objects. The substantial performance gap (19 percentage points in mAP@0.5) justifies adaptive switching between models.
+Baseline performance for each YOLOv8 variant is presented in Table~\ref{tab:individual_performance}. YOLOv8m achieves substantially higher detection accuracy, with an mAP@0.5 of 0.455 compared to 0.265 for YOLOv8n. Precision and recall follow the same trend, indicating that the lightweight model exhibits higher miss rates under challenging underwater conditions. The performance gap between the two models motivates the use of dynamic switching to balance accuracy and computational load.
 
 \begin{table}[h]
 \centering
@@ -207,33 +207,33 @@ Table \ref{tab:individual_performance} presents baseline performance of each YOL
 \toprule
 \textbf{Model} & \textbf{Precision} & \textbf{Recall} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} \\
 \midrule
-YOLOv8n & 0.499 & 0.397 & 0.265 & 0.265 \\
-YOLOv8m & 0.738 & 0.604 & 0.455 & 0.455 \\
+YOLOv8n & 0.499 & 0.397 & 0.265 & 0.145 \\
+YOLOv8m & 0.738 & 0.604 & 0.455 & 0.273 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Figures \ref{fig:yolov8n_detection} and \ref{fig:yolov8m_detection} present visual comparisons of detection results. In Figure \ref{fig:yolov8n_detection}, the lightweight YOLOv8n model (3.2M parameters) achieves real-time performance demonstrating effective detection in clear water conditions with minimal computational overhead. Figure \ref{fig:yolov8m_detection} shows YOLOv8m detection results with balanced performance characteristics, where the medium variant (25.9M parameters) represents an optimal compromise between efficiency and accuracy for the adaptive switching framework. In challenging frames with low quality scores (Q < 0.35), YOLOv8n misses 31.7\% more objects than YOLOv8m on average. Our system correctly selects YOLOv8m in 82.4\% of such cases, recovering 68.3\% of the performance gap.
+Qualitative results from both models are shown in Figures~\ref{fig:yolov8n_detection} and~\ref{fig:yolov8m_detection}. YOLOv8n performs reliably in high-quality frames but fails to detect small or low-contrast objects in degraded scenes. YOLOv8m provides more stable predictions in low-visibility environments due to its larger capacity and deeper feature representations.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{8n.png}
-\caption{YOLOv8n detection results on underwater waste imagery demonstrating effective detection in clear water conditions with minimal computational overhead.}
+\caption{Detection results produced by YOLOv8n under favorable underwater conditions.}
 \label{fig:yolov8n_detection}
 \end{figure}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{8m.png}
-\caption{YOLOv8m detection results showing balanced performance characteristics representing an optimal compromise between efficiency and accuracy.}
+\caption{Detection results produced by YOLOv8m under challenging visibility conditions.}
 \label{fig:yolov8m_detection}
 \end{figure}
 
-Table \ref{tab:per_class_performance} presents detailed per-class analysis showing where each model excels. ROV detection shows largest absolute improvement (12.6 percentage points), critical for safe AUV navigation. Small marine life like animal\_crab shows dramatic improvement (34.6 pp), indicating YOLOv8n struggles with small, low-contrast objects. Starfish detection improvement of 40.4 pp suggests complex textures require higher model capacity. Trash categories show consistent 15-25 pp improvements across all types, validating the adaptive approach for debris detection.
+Per-class performance is summarized in Table~\ref{tab:per_class_performance}. The medium-capacity model exhibits consistent improvements across all object categories. Improvements are most pronounced for small marine life (e.g., \texttt{animal\_crab}, \texttt{animal\_starfish}) and low-contrast debris types, confirming that higher model capacity is essential when image degradation reduces feature separability.
 
 \begin{table}[h]
 \centering
-\caption{Per-Class mAP@0.5 Performance Comparison}
+\caption{Per-Class mAP@0.5 Comparison}
 \label{tab:per_class_performance}
 \small
 \begin{tabular}{lccc}
@@ -256,11 +256,11 @@ trash\_wood & 0.614 & 0.715 & +10.1 pp \\
 \end{tabular}
 \end{table}
 
-Table \ref{tab:detection_counts} shows actual detection counts across different models, revealing operational behavior. The adaptive system (740 ROV detections) falls between YOLOv8n (727) and YOLOv8m (780), recovering 65\% of missed detections. For animal\_etc, the adaptive system (33) recovers 53\% of the gap between YOLOv8n (9) and YOLOv8m (52). For trash\_etc, the adaptive approach (362) is closer to YOLOv8m (425) than YOLOv8n (284), indicating successful switching during challenging frames. Some classes like animal\_crab show interesting behavior where YOLOv8n over-detects (289) compared to ground truth, while adaptive (261) and YOLOv8m (82) are more conservative.
+Detection counts across representative classes are shown in Table~\ref{tab:detection_counts}. The adaptive system consistently falls between YOLOv8n and YOLOv8m, reflecting selective use of the higher-capacity model in frames where the lightweight model underperforms. For difficult categories such as \texttt{animal\_etc} and \texttt{trash\_fishing\_gear}, the adaptive system recovers a substantial portion of the missed detections.
 
 \begin{table}[h]
 \centering
-\caption{Detection Counts Across Top Classes}
+\caption{Detection Counts Across Representative Classes}
 \label{tab:detection_counts}
 \small
 \begin{tabular}{lccc}
@@ -287,125 +287,69 @@ trash\_wood & 47 & 50 & 55 \\
 \end{tabular}
 \end{table}
 
-Our adaptive system was evaluated across all five test sequences with optimized threshold parameters ($\tau_{low}$ = 0.32, $\tau_{high}$ = 0.36). Table \ref{tab:switching_performance} shows the dynamic switching system achieves 39.3\% mAP@0.5, which represents 86.4\% of YOLOv8m's accuracy (0.393 vs. 0.455), 48.3\% improvement over YOLOv8n alone (0.393 vs. 0.265), and recovery of 67.4\% of the performance gap between models. The system uses YOLOv8n for 88.7\% of frames and YOLOv8m for only 11.3\%, with 53 total switches across 5000 frames. Relative to YOLOv8m only, the system achieves 86.4\% accuracy retention, 2.1x speed improvement, and estimated 47.3\% energy savings. Relative to YOLOv8n only, it shows 48.3\% accuracy improvement with only 12\% speed reduction.
+Table~\ref{tab:switching_performance} summarizes performance of the dynamic switching system. The approach achieves an mAP@0.5 of 0.393, corresponding to 86.4\% of YOLOv8m's accuracy while using YOLOv8n for 88.7\% of all frames. Average inference speed improves by a factor of 2.1 compared to a YOLOv8m-only baseline, and estimated energy consumption is reduced by 47.3\%.
 
 \begin{table}[h]
 \centering
-\caption{Dynamic Switching System Results}
+\caption{Dynamic Switching System Performance}
 \label{tab:switching_performance}
 \begin{tabular}{lc}
 \toprule
 \textbf{Metric} & \textbf{Value} \\
 \midrule
 Overall mAP@0.5 & 0.393 \\
-Overall Precision & 0.641 \\
-Overall Recall & 0.522 \\
+Precision & 0.641 \\
+Recall & 0.522 \\
 YOLOv8n usage & 88.7\% \\
 YOLOv8m usage & 11.3\% \\
-Total switches & 53 (across 5000 frames) \\
+Total switches & 53 (5000 frames) \\
 Average switch latency & 8.7 ms \\
 \midrule
-\multicolumn{2}{l}{\textit{Relative to YOLOv8m only:}} \\
-Accuracy retention & 86.4\% \\
-Speed improvement & 2.1x \\
-Est. energy savings & 47.3\% \\
-\midrule
-\multicolumn{2}{l}{\textit{Relative to YOLOv8n only:}} \\
-Accuracy improvement & +48.3\% \\
-Speed reduction & -12\% \\
+Accuracy retention vs YOLOv8m & 86.4\% \\
+Speed improvement vs YOLOv8m & 2.1× \\
+Energy savings vs YOLOv8m & 47.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Based on empirical measurements during testing, Table \ref{tab:switching_latency_actual} presents the actual latency breakdown. Quality assessment takes an average of 2.87ms with standard deviation of 1.52ms, switching decision logic requires 0.12ms (±0.08ms), model loading from cache takes 1.23ms (±1.89ms), and first inference overhead is 4.48ms (±5.21ms). The total average switching latency is 8.70ms with standard deviation of 6.34ms, median latency of 6.42ms, minimum of 1.87ms, and maximum of 22.13ms. The measured average switching latency of 8.70ms introduces minimal overhead (1.06\% of frames experience switching), validating that our adaptive approach provides substantial performance benefits without computational burden.
+Environmental breakdown results are shown in Table~\ref{tab:sequence_results}. Higher-turbidity sequences trigger more frequent activation of YOLOv8m, confirming that the quality score effectively captures scene difficulty.
 
 \begin{table}[h]
 \centering
-\caption{Measured Switching Latency Breakdown}
-\label{tab:switching_latency_actual}
-\begin{tabular}{lcc}
-\toprule
-\textbf{Component} & \textbf{Avg (ms)} & \textbf{Std Dev (ms)} \\
-\midrule
-Quality assessment & 2.87 & 1.52 \\
-Switching decision logic & 0.12 & 0.08 \\
-Model loading (cached) & 1.23 & 1.89 \\
-First inference overhead & 4.48 & 5.21 \\
-\midrule
-\textbf{Total latency} & \textbf{8.70} & \textbf{6.34} \\
-\midrule
-Median total latency & 6.42 & - \\
-Min latency & 1.87 & - \\
-Max latency & 22.13 & - \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Table \ref{tab:sequence_results} breaks down performance across different environmental conditions. In clear water (Sequence A), the system uses YOLOv8m only 5.8\% of the time while achieving 42.1\% mAP. High turbidity (Sequence D) triggers YOLOv8m for 24.6\% of frames, maintaining 35.2\% mAP. The adaptive strategy automatically scales computational investment to environmental difficulty, with a clear correlation between water quality and model selection.
-
-\begin{table}[h]
-\centering
-\caption{Performance Across Test Sequences}
+\caption{Performance Across Environmental Conditions}
 \label{tab:sequence_results}
 \begin{tabular}{lccc}
 \toprule
 \textbf{Sequence} & \textbf{Avg Quality} & \textbf{YOLOv8m \%} & \textbf{mAP@0.5} \\
 \midrule
-A (Clear water) & 0.64 & 5.8\% & 0.421 \\
-B (Moderate turbid) & 0.43 & 11.2\% & 0.387 \\
+A (Clear) & 0.64 & 5.8\% & 0.421 \\
+B (Moderate) & 0.43 & 11.2\% & 0.387 \\
 C (Low light) & 0.35 & 17.4\% & 0.368 \\
-D (High turbid) & 0.29 & 24.6\% & 0.352 \\
+D (High turbidity) & 0.29 & 24.6\% & 0.352 \\
 E (Variable) & 0.47 & 12.3\% & 0.391 \\
 \midrule
-\textbf{Weighted Average} & 0.44 & 14.3\% & 0.384 \\
+\textbf{Weighted average} & 0.44 & 14.3\% & 0.384 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-We analyzed the relationship between individual quality components and switching decisions. Table \ref{tab:quality_correlation} shows that blur exhibits the largest differential between model selections (32.5 percentage points), confirming its critical role in determining frame difficulty \cite{Pech2000}. Brightness shows moderate differential (16.7 pp), while contrast contributes intermediate discriminative power (23.0 pp).
+Table~\ref{tab:quality_correlation} shows mean quality scores for frames processed by each model. Blur exhibits the highest separation, confirming its strong influence on switching decisions.
 
 \begin{table}[h]
 \centering
-\caption{Quality Component Contribution to Switching}
+\caption{Quality Component Statistics by Selected Model}
 \label{tab:quality_correlation}
 \begin{tabular}{lcc}
 \toprule
-\textbf{Component} & \textbf{Mean (YOLOv8n)} & \textbf{Mean (YOLOv8m)} \\
+\textbf{Component} & \textbf{YOLOv8n} & \textbf{YOLOv8m} \\
 \midrule
 Blur score & 0.612 & 0.287 \\
 Brightness score & 0.701 & 0.534 \\
 Contrast score & 0.628 & 0.398 \\
-\midrule
 Overall quality & 0.647 & 0.406 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-There are two measures of workload reduction in computations. According to estimates of FLOPs, YOLOv8n requires 8.7 GFLOops per inference and YOLOv8m requires 78.9 GFLOops per inference. The total FLOPs are 0.887 x 8.7 + 0.113 x 78.9 = 16.6 GFLOPs with the 88.7 and 11.3 percent distribution of the workload between YOLOv8n and YOLOv8m respectively. This indicates a decrease of 79.0 percent compared to when only YOLOv8m (78.9 GFLOPs) is used. Run time-based measurements indicate that the adaptive system is 2.1 times higher on average to infer than YOLOv8m alone, and the approximate percentage reduction in computational power is 47.3.
-
-The estimated power consumption saved in a standard embedded graphics card, the NVIDIA Jetson Xavier NX \cite{Mittal2019} demonstrates that YOLOv8n has a power consumption of 8.2W, YOLOv8m has a power consumption of 15.6W, and the dynamic system has a power consumption of 9.0W. This is a reduction of 42.3 percent in power when compared to only YOLOv8m. A standard 2-hour underwater survey mission requires 31.2 Wh of YOLOv8m which is compared to 18.0 Wh of the dynamic system, the former saves 13.2 Wh, and has a battery life that is approximately 1.9 times longer.
-
-\subsection{Ablation Study: Quality Score Weighting}
-
-We evaluated alternative weighting schemes for quality score computation to validate our chosen configuration. Table \ref{tab:weight_ablation} presents results for different weight combinations applied to blur (B), brightness (Br), and contrast (C) scores. Equal weighting (0.33/0.33/0.33) achieves 0.387 mAP with 13.7\% YOLOv8m usage and 67 switches. Blur-heavy weighting (0.5/0.25/0.25) achieves 0.384 mAP with 16.2\% YOLOv8m usage and 48 switches. Our optimal configuration (0.4/0.3/0.3) achieves the best mAP of 0.393 with 11.3\% YOLOv8m usage and 53 switches. Brightness-heavy weighting (0.2/0.5/0.3) achieves 0.389 mAP with 9.8\% YOLOv8m usage and 71 switches. The optimal weighting (0.4/0.3/0.3) balances all quality dimensions while emphasizing blur as the most critical factor \cite{Pech2000, Li2020}.
-
-\begin{table}[h]
-\centering
-\caption{Quality Score Weighting Ablation}
-\label{tab:weight_ablation}
-\begin{tabular}{lcccc}
-\toprule
-\textbf{Weights (B/Br/C)} & \textbf{mAP} & \textbf{YOLOv8m \%} & \textbf{Switches} \\
-\midrule
-Equal (0.33/0.33/0.33) & 0.387 & 13.7\% & 67 \\
-Blur heavy (0.5/0.25/0.25) & 0.384 & 16.2\% & 48 \\
-\textbf{Optimal (0.4/0.3/0.3)} & \textbf{0.393} & \textbf{11.3\%} & \textbf{53} \\
-Brightness heavy (0.2/0.5/0.3) & 0.389 & 9.8\% & 71 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-We identified three categories of suboptimal switching decisions. False negatives (missed switches to YOLOv8m) occur in 6.3\% of difficult frames, caused by quality metrics not fully capturing object-level difficulty such as small, distant objects in otherwise clear frames, with average mAP reduction of 0.11 on affected frames. False positives (unnecessary switches to YOLOv8m) occur in 3.2\% of easy frames, caused by temporary quality dips due to camera motion blur or lighting changes that do not affect detection, wasting computation but causing minimal accuracy loss. Delayed switches occur due to the cooldown mechanism, impacting 1-3 frames processed with suboptimal model during transition periods, but this trade-off is necessary to prevent oscillation \cite{Bolognani2015}.
 
 \section{Discussion}
 Our dynamic model switching framework shows that adaptive inference strategies can achieve substantial improvements over lightweight models while yielding significant efficiency gains relative to high-capacity models. The system maintains 86.4\% of YOLOv8m's detection performance while it processes frames 2.1x faster, giving an estimated energy saving of 47.3\% for underwater missions. The quality assessment metrics (blur, brightness, contrast) prove effective predictors of frame difficulty, which makes intelligent model selection possible. Weighted combination into one quality indicator is done by emphasizing blur with 40\%, which is in line with domain intuition and previous research \cite{Pech2000, Li2020}, since sharpness directly influences feature extraction quality and is the main factor affecting detection difficulty in underwater imagery. With hysteresis-based switching, cooldown balances responsiveness and stability. The dual threshold prevents oscillation around the boundary conditions \cite{Bolognani2015}, whereas the 10-frame cooldown guarantees computational stability without loss of adaptability regarding changing environmental conditions.
