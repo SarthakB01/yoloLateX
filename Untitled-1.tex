@@ -60,99 +60,96 @@ Specialized underwater waste detection systems have been developed, including ea
 
 \section{Methodology}
 
-Our dynamic model switching system comprises four primary components working in concert to achieve adaptive inference. The image quality assessment module evaluates incoming frames across three quality dimensions. The model switching logic implements hysteresis-based decision mechanism with cooldown periods. The dual YOLO inference pipeline executes the selected model (YOLOv8n or YOLOv8m) on processed frames. Finally, the performance analytics engine logs comprehensive metrics for post-mission analysis and optimization. Figure \ref{fig:system_overview} illustrates the complete system architecture with the graphical user interface that enables real-time parameter configuration and performance monitoring.
+The dynamic model switching framework consists of four components operating jointly: an image quality assessment module, a hysteresis-based switching mechanism, a dual-model YOLO inference pipeline, and a performance analytics subsystem. Each component functions independently, allowing modular adaptation without architectural coupling.
 
 \subsection{Image Quality Assessment}
 
-The quality assessment module is based on three parallel computation of normalized scores, which quantify three different characteristics of image degradation. This methodology follows the research on no-reference image quality evaluation at underwater condition optimization as on no-reference image quality assessment research by Mittal2012. The variance of the Laplacian operator in blur detection is based on a single-value image sharpness measure, which is available in a single-value image texture application such as Sharpening . The Laplacian brings out areas of high intensity variation (edges), and its variance measures edge strength everywhere in the image: 
+The quality assessment module computes three normalized metrics—blur, brightness, and contrast—based on established no-reference image quality principles \cite{Mittal2012}. Blur estimation uses the variance of the Laplacian operator:
 
 \begin{equation}
 L = \nabla^2 I = \frac{\partial^2 I}{\partial x^2} + \frac{\partial^2 I}{\partial y^2}
 \end{equation}
-
 \begin{equation}
-\sigma^2_L = \text{var}(L)
+\sigma_L^2 = \text{var}(L)
 \end{equation}
 
-The raw variance is the normalized value which can be mapped to [0,1] by using a sigmoid function: 
-
+The sharpness measure is normalized through a sigmoid mapping:
 \begin{equation}
-S_{blur} = \frac{1}{1 + e^{-10(\sigma^2_L / 500 - 0.3)}}
+S_{blur} = \frac{1}{1 + e^{-10(\sigma_L^2 / 500 - 0.3)}}
 \end{equation}
 
-with k empirically set to 10 and x empirically set to 0.3 to give steep transitions about a series of common sharpness levels seen in underwater imagery. 
-
-Brightness assessment checks the histogram distribution of grayscale intensity values. The mean brightness $\mu_B$ is computed as:
-
+Brightness assessment uses histogram statistics:
 \begin{equation}
 \mu_B = \frac{\sum_{i=0}^{255} i \cdot H(i)}{\sum_{i=0}^{255} H(i)}
 \end{equation}
 
-where $H(i)$ is the histogram count for intensity level $i$. The brightness score incorporates both deviation from an optimal range $[B_{min}, B_{max}]$ and penalty factors for extreme distributions:
+A range-based scoring function evaluates deviation from the optimal brightness interval:
 
 \begin{equation}
-S_{brightness} = 
+S_{brightness} =
 \begin{cases}
-\min\left(1.0, 0.85 + 0.15\left(1 - \dfrac{|\mu_B - B_{center}|}{B_{range}/2}\right)\right) \\ 
-\quad \text{if } B_{min} \leq \mu_B \leq B_{max} \\
-\max\left(0.1, \min\left(0.8, 0.8 - 0.7 \cdot p_{sensitivity}\right)\right) \\
-\quad \text{otherwise}
+\min\!\left(1.0,\; 0.85 + 0.15\left(1 - 
+\dfrac{|\mu_B - B_{center}|}{B_{range}/2}\right)\right), 
+& B_{min} \leq \mu_B \leq B_{max} \\[6pt]
+
+\max\!\left(0.1,\; \min\!\left(0.8,\; 0.8 - 0.7\, p_{sensitivity}\right)\right), 
+& \text{otherwise}
 \end{cases}
 \end{equation}
 
-Additional penalties are applied for excessive concentration in dark (intensity < 60) or bright (intensity > 196) regions, indicating underexposure or overexposure respectively.
 
-Contrast measurement uses the standard deviation of grayscale intensities as a proxy for overall dynamic range \cite{Peli1990}:
-
+Contrast is approximated using grayscale intensity standard deviation \cite{Peli1990}:
 \begin{equation}
 \sigma_I = \sqrt{\frac{1}{N}\sum_{i=1}^{N}(I_i - \mu_I)^2}
 \end{equation}
 
-Similar to blur scoring, contrast is normalized and mapped using a sigmoid:
-
+A sigmoid normalizes contrast:
 \begin{equation}
 S_{contrast} = \frac{1}{1 + e^{-8(\sigma_I / 80 - 0.4)}}
 \end{equation}
 
-The three component scores are combined using weighted averaging:
-
+The final quality score is a weighted combination:
 \begin{equation}
-Q = 0.4 \cdot S_{blur} + 0.3 \cdot S_{brightness} + 0.3 \cdot S_{contrast}
+Q = 0.4 S_{blur} + 0.3 S_{brightness} + 0.3 S_{contrast}
 \end{equation}
 
-The weights reflect relative importance: blur (sharpness) is weighted highest as it directly impacts feature extraction capability \cite{Li2020}, while brightness and contrast contribute equally to overall visibility.
+Blur receives the highest weight due to its dominant impact on feature extraction reliability in degraded underwater scenes \cite{Li2020}.
+
 
 \subsection{Model Switching Strategy}
 
-The switching logic implements hysteresis with cooldown to prevent rapid oscillation while maintaining responsiveness to quality changes \cite{Bolognani2015}:
+A hysteresis-based switching mechanism governs transitions between YOLOv8n and YOLOv8m to prevent oscillation during borderline quality conditions. Two thresholds, $\tau_{low}$ and $\tau_{high}$, define the hysteresis band, and a cooldown interval $\Delta f_{cooldown}$ enforces a minimum frame gap between consecutive switches.
 
 \begin{algorithm}
 \caption{Hysteresis-Based Model Switching}
 \begin{algorithmic}[1]
-\STATE \textbf{Input:} Current quality score $Q$, frame number $f$
+\STATE \textbf{Input:} Quality score $Q$, frame index $f$
 \STATE \textbf{Parameters:} $\tau_{low}$, $\tau_{high}$, $\Delta f_{cooldown}$
 \STATE \textbf{State:} $M_{current}$, $f_{last\_switch}$
-\IF{$f - f_{last\switch} < \Delta f{cooldown}$}
-    \STATE \textbf{return} $M_{current}$ \COMMENT{Cooldown active}
+\IF{$f - f_{last\_switch} < \Delta f_{cooldown}$}
+    \STATE \textbf{return} $M_{current}$
 \ENDIF
-\IF{$M_{current} = n$ \AND $Q < \tau_{low}$}
+\IF{$M_{current} = n$ AND $Q < \tau_{low}$}
     \STATE $M_{current} \leftarrow m$
     \STATE $f_{last\_switch} \leftarrow f$
-    \STATE Log switch: $n \rightarrow m$ (quality degradation)
-\ELSIF{$M_{current} = m$ \AND $Q > \tau_{high}$}
+\ELSIF{$M_{current} = m$ AND $Q > \tau_{high}$}
     \STATE $M_{current} \leftarrow n$
     \STATE $f_{last\_switch} \leftarrow f$
-    \STATE Log switch: $m \rightarrow n$ (quality improvement)
 \ENDIF
 \STATE \textbf{return} $M_{current}$
 \end{algorithmic}
 \end{algorithm}
 
-Key design considerations include the hysteresis gap ($\tau_{high} - \tau_{low}$) which prevents oscillation when quality hovers near a single threshold, the cooldown period ($\Delta f_{cooldown}$) which enforces minimum frames between switches to avoid excessive transitions, and the default state where the system initializes with the lightweight model (YOLOv8n) for optimal energy efficiency.
+The system initializes with YOLOv8n to minimize startup computational overhead. Hysteresis prevents rapid toggling around boundary values, and cooldown provides temporal stability.
 
 \subsection{Dataset and Model Training}
 
-We utilize the TrashCAN 1.0 dataset \cite{Hong2020}, specifically designed for underwater waste detection. The dataset comprises 7,212 annotated frames across fifteen categories including marine life (ROV, plant, animal\_fish, animal\_starfish, animal\_shells, animal\_crab, animal\_eel, animal\_etc) and trash categories (trash\_plastic, trash\_metal, trash\_paper, trash\_wood, trash\_fabric, trash\_fishing\_gear, trash\_rubber, trash\_etc). The dataset was captured across multiple underwater locations with varying turbidity, lighting, and depth conditions. As shown in Figure \ref{fig:dataset_samples}, the annotations demonstrate the complexity of underwater object detection with 15 distinct categories across diverse environmental conditions.
+The TrashCAN 1.0 dataset \cite{Hong2020} is used for detector training and evaluation. It includes 7,212 annotated underwater frames across fifteen categories representing marine organisms, ROV components, and multiple waste types. Dataset splits maintain class balance across training (70\%), validation (15\%), and test sets (15\%).
+
+YOLOv8n and YOLOv8m are fine-tuned from COCO pretrained weights using transfer learning \cite{Yosinski2014}. Both models are trained for 100 epochs with batch size 16 at $640 \times 640$ resolution using SGD (momentum = 0.937), cosine annealing, weight decay 0.0005, and augmentations including mosaic, mixup, flipping, and scale jitter \cite{Bochkovskiy2020}. YOLOv8n converges in 2.5 hours and YOLOv8m in 6.5 hours on an NVIDIA Tesla T4.
+
+YOLOv8 employs a CSPNet backbone \cite{Wang2020}, C2f modules, SPPF \cite{He2015}, and a combined FPN–PAN neck \cite{Lin2017, Liu2018}. The detection head uses an anchor-free formulation and distribution-based bounding box regression.
+
 
 \begin{figure}[t]
 \centering
@@ -165,10 +162,11 @@ The dataset was split into training (70\%), validation (15\%), and test (15\%) s
 
 YOLOv8 uses a CSPNet-based backbone \cite{Wang2020} combined with C2f modules for every backbone feature extraction block. The backbone consists of an initial conv stem (3×3 convolution), four CSP bottleneck stages with progressive channel expansion, and SPPF (Spatial Pyramid Pooling Fast) to aggregate multi-scale features \cite{He2015}. The neck structure is composed of FPN (Feature Pyramid Network) for the top-down pathway \cite{Lin2017}, PAN (Path Aggregation Network) for the bottom-up pathway \cite{Liu2018}, both containing C2f modules at each fusion level for efficient feature mixing. The neck feeds into a decoupled head with one head each for classification and localization, an anchor-free design using distribution focal loss \cite{Li2020b}, and three detection scales (P3, P4, P5) for multi-scale prediction. The major difference between YOLOv8n and YOLOv8m has to do with the depth and width scaling factors applied to these components that were responsible for the difference in parameter count, 3.2M versus 25.9M parameters.
 
-\subsection{Threshold Optimization Methodology}
-We have a systematic model of establishing the best switching thresholds to the various underwater conditions. Our own validation script was created that operates on video sequences with different threshold pairs and measures overall performance statistics. Each threshold configuration (= 20) of the type of parameters: ($\tau{low}, \tau{high}$) is tested by the script on the average mAP, model usage distribution, frequency of switching, and accuracy of detection per class on a variety of test sequences reflecting the different water conditions (clear, moderate turbidity, high turbidity, low light, and variable conditions).
+\subsection{Threshold Optimization}
 
-Through the optimization process, the range of thresholds that can maximize detection accuracy and minimize computational overhead with regard to particular deployment situations is determined. This analysis suggests recommended parameters under various underwater conditions and these parameters are shown in table 1. In clear water with sufficient lighting, the lightweight model is preferred but in high turbidity the high threshold (0.40, 0.45) enables the balanced model to be used more often. This data-driven calibration allows operators to set the system in the best way possible before implementation in accordance with the anticipated environmental conditions.
+Threshold selection is performed through grid evaluation across 20 $(\tau_{low}, \tau_{high})$ pairs. Each configuration is tested on multiple video sequences covering clear, moderate, turbid, low-light, and variable environments. Metrics include mAP, model usage ratio, switch count, and class-level performance.
+
+The final recommended parameters for distinct underwater conditions are listed in Table~\ref{tab:env_params}, enabling environmental tuning without modifying core architecture.
 
 \begin{table}[h]
 \centering
@@ -193,7 +191,10 @@ We assess system performance using multiple complementary metrics. Detection acc
 
 System behavior is tracked through quality score distribution (histogram of frame quality scores), switching latency (time delay between quality threshold crossing and actual model switch), and quality-performance correlation (relationship between assessed quality and detection accuracy). We compare our dynamic switching approach against two static baselines: YOLOv8n only (lightweight model used exclusively) and YOLOv8m only (balanced capacity model used exclusively). Evaluation uses five diverse underwater video sequences (1000 frames each) representing clear shallow water with good lighting, moderate turbidity with suspended particles, deep water with low ambient light, high turbidity with limited visibility (<2m), and variable conditions with lighting changes.
 
-The system was implemented using Python 3.9.13, PyTorch 2.0.1, Ultralytics YOLOv8 8.0.196, OpenCV 4.8.0, NumPy 1.24.3, Matplotlib 3.7.1, and Pandas 2.0.3. Quality assessment uses blur sigmoid parameters k=10.0 and x₀=0.3 with variance cap of 500, brightness sensitivity of 1.0 with optimal range 100-140, and contrast sigmoid parameters k=8.0 and x₀=0.4 with standard deviation cap of 80. Model switching configuration includes low threshold ($\tau_{low}$) of 0.32, high threshold ($\tau_{high}$) of 0.36, cooldown period of 10 frames, frame check interval of 1, and initial model set to YOLOv8n.
+The system was implemented using Python 3.9.13, PyTorch 2.0.1, Ultralytics YOLOv8 8.0.196, OpenCV 4.8.0, NumPy 1.24.3, Matplotlib 3.7.1, and Pandas 2.0.3. 
+Quality assessment uses blur sigmoid parameters $k = 10.0$ and $x_0 = 0.3$ with a variance cap of 500, brightness sensitivity of 1.0 with an optimal range of 100--140, and contrast sigmoid parameters $k = 8.0$ and $x_0 = 0.4$ with a standard deviation cap of 80. 
+Model switching configuration includes a low threshold ($\tau_{low}$) of 0.32, a high threshold ($\tau_{high}$) of 0.36, a cooldown period of 10 frames, a frame check interval of 1, and the initial model set to YOLOv8n.
+
 
 \section{Results and Analysis}
 
